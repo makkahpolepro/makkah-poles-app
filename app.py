@@ -97,14 +97,17 @@ async def upload_poles(file: UploadFile = File(...), db: Session = Depends(get_d
 
 @app.get("/pole/{pole_id}", response_class=HTMLResponse)
 async def pole_details(pole_id: str, db: Session = Depends(get_db)):
-    clean_search_id = pole_id.strip()
+    clean_search_id = str(pole_id).strip()
     
+    # 1. البحث المباشر المطابق تماماً
     pole = db.query(Pole).filter(Pole.pole_id == clean_search_id).first()
     
+    # 2. إذا لم يتم العثور عليه، نقوم بالبحث عبر مقارنة مرنة تتجاهل المسافات وحالة الأحرف
     if not pole:
         all_poles = db.query(Pole).all()
         for p in all_poles:
-            if str(p.pole_id).strip().lower() == clean_search_id.lower():
+            db_id = str(p.pole_id).strip()
+            if db_id.lower() == clean_search_id.lower() or db_id.lstrip('0') == clean_search_id.lstrip('0'):
                 pole = p
                 break
 
@@ -112,6 +115,7 @@ async def pole_details(pole_id: str, db: Session = Depends(get_db)):
         return HTMLResponse(f"""
             <div style="font-family: Tahoma; text-align: center; padding: 50px; direction: rtl;">
                 <h2 style="color: red;">❌ عذراً، عمود الإنارة برقم ({pole_id}) غير مسجل في النظام.</h2>
+                <p style="color: #666; font-size: 14px;">تأكد من أن اسم العمود مطابق تماماً للبيانات المرفوعة في ملف الإكسل.</p>
                 <a href="/" style="color: #007bff; text-decoration: none; font-size: 16px;">العودة للصفحة الرئيسية</a>
             </div>
         """)
@@ -127,7 +131,7 @@ async def pole_details(pole_id: str, db: Session = Depends(get_db)):
             .card {{ background: white; padding: 30px; border-radius: 10px; box-shadow: 0px 4px 10px rgba(0,0,0,0.1); max-width: 500px; margin: auto; }}
             h2 {{ color: #004085; border-bottom: 2px solid #004085; padding-bottom: 10px; }}
             p {{ font-size: 16px; margin: 15px 0; color: #333; }}
-            .btn {{ display: block; text-align: center; background: #007bff; color: white; padding: 10px; border-radius: 5px; text-decoration: none; margin-top: 20px; }}
+            .btn {{ display: block; text-align: center; background: #007bff; color: white; padding: 12px; border-radius: 5px; text-decoration: none; margin-top: 20px; font-weight: bold; }}
         </style>
     </head>
     <body>
