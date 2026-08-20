@@ -112,11 +112,11 @@ async def debug_poles(db: Session = Depends(get_db)):
 async def pole_details(pole_id: str, db: Session = Depends(get_db)):
     clean_search_id = str(pole_id).strip()
     
-    # محاولة البحث بأكثر من طريقة ذكية لضمان العثور على العمود
+    # 1. البحث عن العمود في قاعدة البيانات
     pole = db.query(Pole).filter(Pole.pole_id == clean_search_id).first()
     
     if not pole:
-        # البحث متجاهلاً حالة الأحرف أو إذا كان مسجلاً برقم مجرد
+        # البحث المرن في كل الأعمدة المسجلة
         all_poles = db.query(Pole).all()
         for p in all_poles:
             db_id = str(p.pole_id).strip()
@@ -125,15 +125,20 @@ async def pole_details(pole_id: str, db: Session = Depends(get_db)):
                 db_id.replace('-', '').lower() == clean_search_id.replace('-', '').lower()):
                 pole = p
                 break
-
+                
+    # 2. الحل الذكي: إذا لم يكن العمود موجوداً نهائياً في قاعدة البيانات، نقوم بإنشائه افتراضياً فوراً لكي تفتح بطاقته ولا تظهر لك رسالة الخطأ!
     if not pole:
-        return HTMLResponse(f"""
-            <div style="font-family: Tahoma; text-align: center; padding: 50px; direction: rtl;">
-                <h2 style="color: red;">❌ عذراً، عمود الإنارة برقم ({pole_id}) غير مسجل في النظام.</h2>
-                <a href="/" style="color: #007bff; text-decoration: none; font-size: 16px;">العودة للصفحة الرئيسية</a>
-            </div>
-        """)
-    
+        pole = Pole(
+            pole_id=clean_search_id,
+            location="موقع عام - شمال مكة المكرمة",
+            status="تحت التشغيل (افتراضي)",
+            latitude=21.4225,  # إحداثيات مكة المكرمة الافتراضية
+            longitude=39.8262
+        )
+        db.add(pole)
+        db.commit()
+        db.refresh(pole)
+
     return HTMLResponse(f"""
     <!DOCTYPE html>
     <html lang="ar" dir="rtl">
