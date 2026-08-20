@@ -97,41 +97,54 @@ async def upload_poles(file: UploadFile = File(...), db: Session = Depends(get_d
 
 # مسار عرض بيانات العمود عند مسح الـ QR Code
 @app.get("/pole/{pole_id}", response_class=HTMLResponse)
-async def get_pole_details(pole_id: str):
-    db = SessionLocal()
-    pole = db.query(Pole).filter(Pole.pole_id == pole_id).first()
-    db.close()
+async def pole_details(pole_id: str, db: Session = Depends(get_db)):
+    # تنظيف معرف العمود القادم من الرابط من أي مسافات زائدة
+    clean_search_id = pole_id.strip()
     
+    # محاولة البحث المطابق أولاً
+    pole = db.query(Pole).filter(Pole.pole_id == clean_search_id).first()
+    
+    # إذا لم يُجد، نحاول البحث بدون حساسيات للأحرف (إذا توفرت) أو إزالة الرموز
     if not pole:
-        return f"""
-        <body style="font-family: Tahoma; direction: rtl; padding: 50px; text-align: center;">
-            <h2 style="color: red;">❌ عذراً، عمود الإنارة برقم ({pole_id}) غير مسجل في النظام.</h2>
-        </body>
-        """
-    
-    return f"""
-    <html>
-        <head>
-            <title>عمود إنارة: {pole.pole_id}</title>
-            <meta charset="utf-8">
-            <style>
-                body {{ font-family: Tahoma, sans-serif; direction: rtl; background-color: #f4f6f9; padding: 30px; text-align: center; }}
-                .card {{ background: white; padding: 30px; border-radius: 10px; box-shadow: 0px 4px 10px rgba(0,0,0,0.1); display: inline-block; width: 400px; text-align: right; }}
-                h2 {{ color: #004085; text-align: center; border-bottom: 2px solid #004085; padding-bottom: 10px; }}
-                p {{ font-size: 16px; margin: 15px 0; }}
-                .btn {{ display: block; text-align: center; background: #007bff; color: white; padding: 10px; text-decoration: none; border-radius: 5px; margin-top: 20px; }}
-            </style>
-        </head>
-        <body>
-            <div class="card">
-                <h2>بطاقة عمود الإنارة</h2>
-                <p><b>رقم العمود:</b> {pole.pole_id}</p>
-                <p><b>الموقع / الحي:</b> {pole.location}</p>
-                <p><b>الحالة التشغيلية:</b> {pole.status}</p>
-                <p><b>خط العرض:</b> {pole.latitude}</p>
-                <p><b>خط الطول:</b> {pole.longitude}</p>
-                <a class="btn" href="https://www.google.com/maps?q={pole.latitude},{pole.longitude}" target="_blank">📍 فتح الموقع على خريطة جوجل</a>
+        # محاولة البحث عبر جلب كل الأعمدة ومقارنتها بتنظيف المسافات
+        all_poles = db.query(Pole).all()
+        for p in all_poles:
+            if str(p.pole_id).strip().lower() == clean_search_id.lower():
+                pole = p
+                break
+
+    if not pole:
+        return HTMLResponse(f"""
+            <div style="font-family: Tahoma; text-align: center; padding: 50px; direction: rtl;">
+                <h2 style="color: red;">❌ عذراً، عمود الإنارة برقم ({pole_id}) غير مسجل في النظام.</h2>
+                <a href="/" style="color: #007bff; text-decoration: none; font-size: 16px;">العودة للصفحة الرئيسية</a>
             </div>
-        </body>
+        """)
+    
+    return HTMLResponse(f"""
+    <!DOCTYPE html>
+    <html lang="ar" dir="rtl">
+    <head>
+        <meta charset="UTF-8">
+        <title>تفاصيل عمود الإنارة: {pole.pole_id}</title>
+        <style>
+            body {{ font-family: Tahoma, sans-serif; background-color: #f4f6f9; padding: 30px; text-align: center; }}
+            .card {{ background: white; padding: 30px; border-radius: 10px; box-shadow: 0px 4px 10px rgba(0,0,0,0.1); max-width: 500px; margin: auto; }}
+            h2 {{ color: #004085; border-bottom: 2px solid #004085; padding-bottom: 10px; }}
+            p {{ font-size: 16px; margin: 15px 0; color: #333; }}
+            .btn {{ display: block; text-align: center; background: #007bff; color: white; padding: 10px; border-radius: 5px; text-decoration: none; margin-top: 20px; }}
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <h2> بطاقة عمود إنارة </h2>
+            <p><b>رقم العمود:</b> {pole.pole_id}</p>
+            <p><b>الموقع:</b> {pole.location}</p>
+            <p><b>الحالة:</b> {pole.status}</p>
+            <p><b>خط العرض:</b> {pole.latitude}</p>
+            <p><b>خط الطول:</b> {pole.longitude}</p>
+            <a class="btn" href="https://www.google.com/maps?q={pole.latitude},{pole.longitude}" target="_blank">📍 عرض الموقع على خرائط جوجل</a>
+        </div>
+    </body>
     </html>
-    """
+    """)
