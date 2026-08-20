@@ -46,41 +46,39 @@ async def upload_poles(file: UploadFile = File(...), db: Session = Depends(get_d
         contents = await file.read()
         df = pd.read_excel(io.BytesIO(contents))
         
+        # طباعة رؤوس الأعمدة للتأكد (ستظهر في logs المنصة)
+        print("Columns found in Excel:", df.columns.tolist())
+        
         for index, row in df.iterrows():
-            raw_id = row.get('pole_id', '')
-            if pd.isna(raw_id) or str(raw_id).strip() == '':
-                continue
+            # استخدام الأسماء الموجودة في صورتك بالضبط (Pole_ID, Latitude, Longitude, Pole_Stat)
+            raw_id = row.get('Pole_ID')
+            if pd.isna(raw_id): continue
             
-            # توحيد تنسيق رقم العمود ليطابق صيغة الـ QR (مثال: تحويل 16 إلى MK-00016 إذا لزم، أو حفظه كـ نص نظيف)
             pole_id_val = str(raw_id).strip()
-            if pole_id_val.isdigit():
-                pole_id_val = f"MK-{int(pole_id_val):05d}"  # يحول 16 إلى MK-00016 تلقائياً
-                
+            
+            # البحث عن العمود
             existing_pole = db.query(Pole).filter(Pole.pole_id == pole_id_val).first()
             
             if existing_pole:
-                existing_pole.location = str(row.get('location', ''))
-                existing_pole.status = str(row.get('status', ''))
-                existing_pole.latitude = float(row.get('latitude', 0.0)) if pd.notna(row.get('latitude')) else 0.0
-                existing_pole.longitude = float(row.get('longitude', 0.0)) if pd.notna(row.get('longitude')) else 0.0
+                existing_pole.location = str(row.get('Description', 'غير محدد'))
+                existing_pole.status = str(row.get('Pole_Stat', 'سليم'))
+                existing_pole.latitude = float(row.get('Latitude', 0.0))
+                existing_pole.longitude = float(row.get('Longitude', 0.0))
             else:
                 new_pole = Pole(
                     pole_id=pole_id_val,
-                    location=str(row.get('location', '')),
-                    status=str(row.get('status', '')),
-                    latitude=float(row.get('latitude', 0.0)) if pd.notna(row.get('latitude')) else 0.0,
-                    longitude=float(row.get('longitude', 0.0)) if pd.notna(row.get('longitude')) else 0.0
+                    location=str(row.get('Description', 'غير محدد')),
+                    status=str(row.get('Pole_Stat', 'سليم')),
+                    latitude=float(row.get('Latitude', 0.0)),
+                    longitude=float(row.get('Longitude', 0.0))
                 )
                 db.add(new_pole)
         
         db.commit()
+        return HTMLResponse("<h2>تم رفع البيانات بنجاح!</h2><a href='/'>العودة</a>")
         
-        return HTMLResponse("""
-            <div style="font-family: Tahoma; text-align: center; padding: 50px; direction: rtl;">
-                <h2 style="color: green;">✅ تم استيراد وحفظ وتوحيد تنسيق جميع الأعمدة بنجاح!</h2>
-                <a href="/" style="color: #007bff; text-decoration: none; font-size: 16px;">العودة للصفحة الرئيسية</a>
-            </div>
-        """)
+    except Exception as e:
+        return HTMLResponse(f"<h2>خطأ في الرفع: {str(e)}</h2>")
         
     except Exception as e:
         db.rollback()
