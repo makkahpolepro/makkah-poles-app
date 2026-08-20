@@ -94,7 +94,15 @@ async def upload_poles(file: UploadFile = File(...), db: Session = Depends(get_d
                 <a href="/" style="color: #007bff; text-decoration: none; font-size: 16px;">العودة للمحاولة</a>
             </div>
         """)
-
+@app.get("/debug-poles", response_class=HTMLResponse)
+async def debug_poles(db: Session = Depends(get_db)):
+    poles = db.query(Pole).all()
+    html = "<h3 style='font-family: Tahoma; direction: rtl;'>الأعمدة المخزنة في قاعدة البيانات حالياً:</h3><ul style='font-family: Tahoma; direction: rtl;'>"
+    for p in poles:
+        html += f"<li><b>رقم العمود:</b> {p.pole_id} | <b>الموقع:</b> {p.location}</li>"
+    html += "</ul><a href='/' style='font-family: Tahoma;'>العودة للرئيسية</a>"
+    return HTMLResponse(html)
+    
 @app.get("/pole/{pole_id}", response_class=HTMLResponse)
 async def pole_details(pole_id: str, db: Session = Depends(get_db)):
     clean_search_id = str(pole_id).strip()
