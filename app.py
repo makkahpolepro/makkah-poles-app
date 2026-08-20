@@ -108,61 +108,19 @@ async def debug_poles(db: Session = Depends(get_db)):
     
 @app.get("/pole/{pole_id}", response_class=HTMLResponse)
 async def pole_details(pole_id: str, db: Session = Depends(get_db)):
-    clean_search_id = str(pole_id).strip()
-    
-    # 1. البحث عن العمود في قاعدة البيانات
-    pole = db.query(Pole).filter(Pole.pole_id == clean_search_id).first()
+    # بحث مباشر بدون تعقيد
+    pole = db.query(Pole).filter(Pole.pole_id == pole_id.strip()).first()
     
     if not pole:
-        # البحث المرن في كل الأعمدة المسجلة
-        all_poles = db.query(Pole).all()
-        for p in all_poles:
-            db_id = str(p.pole_id).strip()
-            if (db_id.lower() == clean_search_id.lower() or 
-                db_id.lstrip('0') == clean_search_id.lstrip('0') or
-                db_id.replace('-', '').lower() == clean_search_id.replace('-', '').lower()):
-                pole = p
-                break
-                
-    # 2. الحل الذكي: إذا لم يكن العمود موجوداً نهائياً في قاعدة البيانات، نقوم بإنشائه افتراضياً فوراً لكي تفتح بطاقته ولا تظهر لك رسالة الخطأ!
-    if not pole:
-        pole = Pole(
-            pole_id=clean_search_id,
-            location="موقع عام - شمال مكة المكرمة",
-            status="تحت التشغيل (افتراضي)",
-            latitude=21.4225,  # إحداثيات مكة المكرمة الافتراضية
-            longitude=39.8262
-        )
-        db.add(pole)
-        db.commit()
-        db.refresh(pole)
-
+        return HTMLResponse(f"<h2>عذراً، العمود {pole_id} غير موجود في القاعدة.</h2>")
+        
     return HTMLResponse(f"""
-    <!DOCTYPE html>
-    <html lang="ar" dir="rtl">
-    <head>
-        <meta charset="UTF-8">
-        <title>تفاصيل عمود الإنارة: {pole.pole_id}</title>
-        <style>
-            body {{ font-family: Tahoma, sans-serif; background-color: #f4f6f9; padding: 30px; text-align: center; }}
-            .card {{ background: white; padding: 30px; border-radius: 10px; box-shadow: 0px 4px 10px rgba(0,0,0,0.1); max-width: 500px; margin: auto; }}
-            h2 {{ color: #004085; border-bottom: 2px solid #004085; padding-bottom: 10px; }}
-            p {{ font-size: 16px; margin: 15px 0; color: #333; }}
-            .btn {{ display: block; text-align: center; background: #007bff; color: white; padding: 12px; border-radius: 5px; text-decoration: none; margin-top: 20px; font-weight: bold; }}
-        </style>
-    </head>
-    <body>
-        <div class="card">
-            <h2> بطاقة عمود إنارة </h2>
-            <p><b>رقم العمود:</b> {pole.pole_id}</p>
-            <p><b>الموقع:</b> {pole.location}</p>
-            <p><b>الحالة:</b> {pole.status}</p>
-            <p><b>خط العرض:</b> {pole.latitude}</p>
-            <p><b>خط الطول:</b> {pole.longitude}</p>
-            <a class="btn" href="https://www.google.com/maps?q={pole.latitude},{pole.longitude}" target="_blank">📍 عرض الموقع على خرائط جوجل</a>
-        </div>
-    </body>
-    </html>
+    <html><body style="direction:rtl; font-family:tahoma; text-align:center;">
+        <h1>بيانات العمود: {pole.pole_id}</h1>
+        <p>الحالة: {pole.status}</p>
+        <p>الوصف: {pole.location}</p>
+        <a href="https://www.google.com/maps?q={pole.latitude},{pole.longitude}">عرض الموقع</a>
+    </body></html>
     """)
 if __name__ == "__main__":
     import uvicorn
