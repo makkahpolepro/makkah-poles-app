@@ -40,28 +40,52 @@ async def home(request: Request):
 
 # مسار معالجة رفع الإكسل
 @app.post("/upload-poles", response_class=HTMLResponse)
-async def upload_poles(file: UploadFile = File(...)):
+async def upload_poles(file: UploadFile = File(...), db: Session = Depends(get_db)):
     try:
-        df = pd.read_excel(file.file)
-        db = SessionLocal()
-        for _, row in df.iterrows():
-            pole = Pole(
-                pole_id=str(row.get('pole_id', '')),
-                location=str(row.get('location', '')),
-                status=str(row.get('status', '')),
-                latitude=float(row.get('latitude', 0.0)),
-                longitude=float(row.get('longitude', 0.0))
-            )
-            db.add(pole)
-        db.commit()
-        db.close()
+        contents = await file.file.read()
+        df = pd.read_excel(io.BytesIO(contents))
         
-        return f"""
-        <body style="font-family: Tahoma; direction: rtl; padding: 50px; text-align: center;">
-            <h2 style="color: green;">✅ تم استيراد بيانات {len(df)} عمود بنجاح إلى النظام!</h2>
-            <a href="/">العودة للصفحة الرئيسية</a>
-        </body>
-        """
+        for index, row in df.iterrows():
+            pole_id_val = str(row.get('pole_id', '')).strip()
+            if not pole_id_val or pole_id_val == 'nan':
+                continue
+                
+            # التحقق مما إذا كان العمود موجوداً مسبقاً
+            existing_pole = db.query(Pole).filter(Pole.pole_id == pole_id_val).first()
+            
+            if existing_pole:
+                existing_pole.location = str(row.get('location', ''))
+                existing_pole.status = str(row.get('status', ''))
+                existing_pole.latitude = float(row.get('latitude', 0.0)) if pd.notna(row.get('latitude')) else 0.0
+                existing_pole.longitude = float(row.get('longitude', 0.0)) if pd.notna(row.get('longitude')) else 0.0
+            else:
+                new_pole = Pole(
+                    pole_id=pole_id_val,
+                    location=str(row.get('location', '')),
+                    status=str(row.get('status', '')),
+                    latitude=float(row.get('latitude', 0.0)) if pd.notna(row.get('latitude')) else 0.0,
+                    longitude=float(row.get('longitude', 0.0)) if pd.notna(row.get('longitude')) else 0.0
+                )
+                db.add(new_pole)
+        
+        # حفظ التغييرات نهائياً في قاعدة البيانات
+        db.commit()
+        
+        return HTMLResponse("""
+            <div style="font-family: Tahoma; text-align: center; padding: 50px; direction: rtl;">
+                <h2 style="color: green;">✅ تم استيراد وحفظ جميع بيانات الأعمدة بنجاح إلى النظام!</h2>
+                <a href="/" style="color: #007bff; text-decoration: none; font-size: 16px;">العودة للصفحة الرئيسية</a>
+            </div>
+        """)
+        
+    except Exception as e:
+        db.rollback()
+        return HTMLResponse(f"""
+            <div style="font-family: Tahoma; text-align: center; padding: 50px; direction: rtl;">
+                <h2 style="color: red;">❌ حدث خطأ أثناء معالجة الملف: {str(e)}</h2>
+                <a href="/" style="color: #007bff; text-decoration: none; font-size: 16px;">العودة للمحاولة</a>
+            </div>
+        """)
     except Exception as e:
         return f"""
         <body style="font-family: Tahoma; direction: rtl; padding: 50px; text-align: center;">
