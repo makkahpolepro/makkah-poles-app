@@ -43,7 +43,7 @@ async def home(request: Request):
 @app.post("/upload-poles", response_class=HTMLResponse)
 async def upload_poles(file: UploadFile = File(...), db: Session = Depends(get_db)):
     try:
-        contents = await file.file.read()
+        contents = await file.read()
         df = pd.read_excel(io.BytesIO(contents))
         
         for index, row in df.iterrows():
@@ -74,6 +74,15 @@ async def upload_poles(file: UploadFile = File(...), db: Session = Depends(get_d
             <div style="font-family: Tahoma; text-align: center; padding: 50px; direction: rtl;">
                 <h2 style="color: green;">✅ تم استيراد وحفظ جميع بيانات الأعمدة بنجاح إلى النظام!</h2>
                 <a href="/" style="color: #007bff; text-decoration: none; font-size: 16px;">العودة للصفحة الرئيسية</a>
+            </div>
+        """)
+        
+    except Exception as e:
+        db.rollback()
+        return HTMLResponse(f"""
+            <div style="font-family: Tahoma; text-align: center; padding: 50px; direction: rtl;">
+                <h2 style="color: red;">❌ حدث خطأ أثناء معالجة الملف: {str(e)}</h2>
+                <a href="/" style="color: #007bff; text-decoration: none; font-size: 16px;">العودة للمحاولة</a>
             </div>
         """)
         
