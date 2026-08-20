@@ -1,7 +1,9 @@
-from fastapi import FastAPI, UploadFile, File, Request, Depends
+from fastapi import FastAPI, UploadFile, File, Request, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 import pandas as pd
-from database import SessionLocal, Pole, init_db
+import io
+from sqlalchemy.orm import Session
+from database import get_db, SessionLocal, Pole, init_db
 
 app = FastAPI()
 
@@ -9,36 +11,35 @@ app = FastAPI()
 def startup_event():
     init_db()
 
-# الصفحة الرئيسية لرفع ملف الإكسل
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
-    return """
-    <html>
-        <head>
-            <title>إدارة أعمدة إنارة مكة</title>
-            <meta charset="utf-8">
-            <style>
-                body { font-family: Tahoma, sans-serif; text-align: center; direction: rtl; background-color: #f4f6f9; padding: 50px; }
-                .card { background: white; padding: 30px; border-radius: 10px; box-shadow: 0px 4px 10px rgba(0,0,0,0.1); display: inline-block; width: 450px; }
-                input[type=file] { margin: 20px 0; }
-                button { background: #28a745; color: white; border: none; padding: 10px 20px; font-size: 16px; border-radius: 5px; cursor: pointer; }
-                button:hover { background: #218838; }
-            </style>
-        </head>
-        <body>
-            <div class="card">
-                <h2>نظام إدارة وصيانة أعمدة إنارة مكة المكرمة</h2>
-                <p>قم بتحديث قاعدة البيانات السحابية عبر رفع ملف الإكسل:</p>
-                <form action="/upload-poles" method="post" enctype="multipart/form-data">
-                    <input type="file" name="file" accept=".xlsx, .xls" required><br>
-                    <button type="submit">رفع واستيراد البيانات</button>
-                </form>
-            </div>
-        </body>
+    return HTMLResponse("""
+    <!DOCTYPE html>
+    <html lang="ar" dir="rtl">
+    <head>
+        <meta charset="UTF-8">
+        <title>نظام إدارة أعمدة الإنارة - مكة المكرمة</title>
+        <style>
+            body { font-family: Tahoma, sans-serif; background-color: #f4f6f9; padding: 40px; text-align: center; }
+            .card { background: white; padding: 40px; border-radius: 10px; box-shadow: 0px 4px 15px rgba(0,0,0,0.1); max-width: 600px; margin: auto; }
+            h2 { color: #004085; margin-bottom: 20px; }
+            input[type="file"] { margin: 20px 0; padding: 10px; border: 1px solid #ccc; border-radius: 5px; width: 100%; box-sizing: border-box; }
+            button { background: #28a745; color: white; border: none; padding: 12px 20px; font-size: 16px; border-radius: 5px; cursor: pointer; width: 100%; }
+            button:hover { background: #218838; }
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <h2>رفع وتحديث بيانات أعمدة الإنارة</h2>
+            <form action="/upload-poles" enctype="multipart/form-data" method="post">
+                <input name="file" type="file" accept=".xlsx, .xls" required>
+                <button type="submit">رفع بيانات الأعمدة</button>
+            </form>
+        </div>
+    </body>
     </html>
-    """
+    """)
 
-# مسار معالجة رفع الإكسل
 @app.post("/upload-poles", response_class=HTMLResponse)
 async def upload_poles(file: UploadFile = File(...), db: Session = Depends(get_db)):
     try:
@@ -50,7 +51,6 @@ async def upload_poles(file: UploadFile = File(...), db: Session = Depends(get_d
             if not pole_id_val or pole_id_val == 'nan':
                 continue
                 
-            # التحقق مما إذا كان العمود موجوداً مسبقاً
             existing_pole = db.query(Pole).filter(Pole.pole_id == pole_id_val).first()
             
             if existing_pole:
@@ -68,7 +68,6 @@ async def upload_poles(file: UploadFile = File(...), db: Session = Depends(get_d
                 )
                 db.add(new_pole)
         
-        # حفظ التغييرات نهائياً في قاعدة البيانات
         db.commit()
         
         return HTMLResponse("""
@@ -86,27 +85,14 @@ async def upload_poles(file: UploadFile = File(...), db: Session = Depends(get_d
                 <a href="/" style="color: #007bff; text-decoration: none; font-size: 16px;">العودة للمحاولة</a>
             </div>
         """)
-    except Exception as e:
-        return f"""
-        <body style="font-family: Tahoma; direction: rtl; padding: 50px; text-align: center;">
-            <h2 style="color: red;">❌ حدث خطأ أثناء معالجة الملف:</h2>
-            <p>{str(e)}</p>
-            <a href="/">العودة للمحاولة</a>
-        </body>
-        """
 
-# مسار عرض بيانات العمود عند مسح الـ QR Code
 @app.get("/pole/{pole_id}", response_class=HTMLResponse)
 async def pole_details(pole_id: str, db: Session = Depends(get_db)):
-    # تنظيف معرف العمود القادم من الرابط من أي مسافات زائدة
     clean_search_id = pole_id.strip()
     
-    # محاولة البحث المطابق أولاً
     pole = db.query(Pole).filter(Pole.pole_id == clean_search_id).first()
     
-    # إذا لم يُجد، نحاول البحث بدون حساسيات للأحرف (إذا توفرت) أو إزالة الرموز
     if not pole:
-        # محاولة البحث عبر جلب كل الأعمدة ومقارنتها بتنظيف المسافات
         all_poles = db.query(Pole).all()
         for p in all_poles:
             if str(p.pole_id).strip().lower() == clean_search_id.lower():
