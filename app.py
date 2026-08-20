@@ -47,9 +47,14 @@ async def upload_poles(file: UploadFile = File(...), db: Session = Depends(get_d
         df = pd.read_excel(io.BytesIO(contents))
         
         for index, row in df.iterrows():
-            pole_id_val = str(row.get('pole_id', '')).strip()
-            if not pole_id_val or pole_id_val == 'nan':
+            raw_id = row.get('pole_id', '')
+            if pd.isna(raw_id) or str(raw_id).strip() == '':
                 continue
+            
+            # توحيد تنسيق رقم العمود ليطابق صيغة الـ QR (مثال: تحويل 16 إلى MK-00016 إذا لزم، أو حفظه كـ نص نظيف)
+            pole_id_val = str(raw_id).strip()
+            if pole_id_val.isdigit():
+                pole_id_val = f"MK-{int(pole_id_val):05d}"  # يحول 16 إلى MK-00016 تلقائياً
                 
             existing_pole = db.query(Pole).filter(Pole.pole_id == pole_id_val).first()
             
@@ -72,7 +77,7 @@ async def upload_poles(file: UploadFile = File(...), db: Session = Depends(get_d
         
         return HTMLResponse("""
             <div style="font-family: Tahoma; text-align: center; padding: 50px; direction: rtl;">
-                <h2 style="color: green;">✅ تم استيراد وحفظ جميع بيانات الأعمدة بنجاح إلى النظام!</h2>
+                <h2 style="color: green;">✅ تم استيراد وحفظ وتوحيد تنسيق جميع الأعمدة بنجاح!</h2>
                 <a href="/" style="color: #007bff; text-decoration: none; font-size: 16px;">العودة للصفحة الرئيسية</a>
             </div>
         """)
