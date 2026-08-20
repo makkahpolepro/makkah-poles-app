@@ -112,15 +112,17 @@ async def debug_poles(db: Session = Depends(get_db)):
 async def pole_details(pole_id: str, db: Session = Depends(get_db)):
     clean_search_id = str(pole_id).strip()
     
-    # 1. البحث المباشر المطابق تماماً
+    # محاولة البحث بأكثر من طريقة ذكية لضمان العثور على العمود
     pole = db.query(Pole).filter(Pole.pole_id == clean_search_id).first()
     
-    # 2. إذا لم يتم العثور عليه، نقوم بالبحث عبر مقارنة مرنة تتجاهل المسافات وحالة الأحرف
     if not pole:
+        # البحث متجاهلاً حالة الأحرف أو إذا كان مسجلاً برقم مجرد
         all_poles = db.query(Pole).all()
         for p in all_poles:
             db_id = str(p.pole_id).strip()
-            if db_id.lower() == clean_search_id.lower() or db_id.lstrip('0') == clean_search_id.lstrip('0'):
+            if (db_id.lower() == clean_search_id.lower() or 
+                db_id.lstrip('0') == clean_search_id.lstrip('0') or
+                db_id.replace('-', '').lower() == clean_search_id.replace('-', '').lower()):
                 pole = p
                 break
 
@@ -128,7 +130,6 @@ async def pole_details(pole_id: str, db: Session = Depends(get_db)):
         return HTMLResponse(f"""
             <div style="font-family: Tahoma; text-align: center; padding: 50px; direction: rtl;">
                 <h2 style="color: red;">❌ عذراً، عمود الإنارة برقم ({pole_id}) غير مسجل في النظام.</h2>
-                <p style="color: #666; font-size: 14px;">تأكد من أن اسم العمود مطابق تماماً للبيانات المرفوعة في ملف الإكسل.</p>
                 <a href="/" style="color: #007bff; text-decoration: none; font-size: 16px;">العودة للصفحة الرئيسية</a>
             </div>
         """)
