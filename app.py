@@ -1,13 +1,16 @@
-from fastapi import FastAPI, UploadFile, File, Request, Depends, HTTPException, Form, status
+from fastapi import FastAPI, Request, Form, Depends, HTTPException, status, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
+from sqlalchemy.orm import Session
 import pandas as pd
 import io
-import datetime
-from sqlalchemy.orm import Session
-from database import get_db, SessionLocal, Pole, init_db, User
+import traceback
+
+from database import SessionLocal, engine, init_db, User, Pole, MaintenanceLog
 
 app = FastAPI()
 
+# تهيئة قاعدة البيانات وإنشاء المستخدم الافتراضي للإدارة عند بدء التشغيل
 @app.on_event("startup")
 def startup_event():
     init_db()
@@ -17,309 +20,242 @@ def startup_event():
         if not admin_user:
             default_admin = User(
                 username="admin",
-                password="123",
+                password="adminpassword123",  # كلمة المرور الافتراضية
                 role="admin",
-                name="مدير النظام الرئيسي"
+                name="مدير النظام العام"
             )
             db.add(default_admin)
             db.commit()
+    except Exception as e:
+        print(f"Startup error: {e}")
     finally:
         db.close()
 
-@app.get("/", response_class=HTMLResponse)
-async def home(request: Request):
-    return HTMLResponse("""
-    <!DOCTYPE html>
-    <html lang="ar" dir="rtl">
-    <head>
-        <meta charset="UTF-8">
-        <title>نظام إدارة أعمدة الإنارة - مكة المكرمة</title>
-        <style>
-            body { font-family: Tahoma, sans-serif; background-color: #f4f6f9; padding: 40px; text-align: center; }
-            .card { background: white; padding: 40px; border-radius: 10px; box-shadow: 0px 4px 15px rgba(0,0,0,0.1); max-width: 600px; margin: auto; }
-            h2 { color: #004085; margin-bottom: 20px; }
-            input[type="file"] { margin: 20px 0; padding: 10px; border: 1px solid #ccc; border-radius: 5px; width: 100%; box-sizing: border-box; }
-            button { background: #28a745; color: white; border: none; padding: 12px 20px; font-size: 16px; border-radius: 5px; cursor: pointer; width: 100%; }
-            button:hover { background: #218838; }
-        </style>
-    </head>
-    <body>
-        <div class="card">
-            <h2>نظام إدارة وصيانة أعمدة الإنارة</h2>
-            <p>مرحباً بك في النظام الرئيسي</p>
-            <br>
-            <a href="/login" style="display:inline-block; background:#007bff; color:white; padding:10px 20px; border-radius:5px; text-decoration:none; font-weight:bold;">تسجيل الدخول</a>
-        </div>
-    </body>
-    </html>
-    """)
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
-# 1. صفحة تسجيل الدخول
+# 1. صفحة تسجيل الدخول العامة
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    return HTMLResponse("""
-    <html lang="ar" dir="rtl">
-    <head><meta charset="UTF-8"><title>تسجيل الدخول - نظام الإنارة</title></head>
-    <body style="font-family: Tahoma; background: #f4f6f9; padding: 50px; text-align: center;">
-        <div style="background: white; padding: 40px; border-radius: 10px; max-width: 400px; margin: auto; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
-            <h2 style="color: #004085;">تسجيل الدخول للنظام</h2>
-            <form action="/login" method="post">
-                <input type="text" name="username" placeholder="اسم المستخدم" style="width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ccc; border-radius: 5px;" required><br>
-                <input type="password" name="password" placeholder="كلمة المرور" style="width: 100%; padding: 10px; margin: 10px 0; border: 1px solid #ccc; border-radius: 5px;" required><br>
-                <button type="submit" style="width: 100%; background: #007bff; color: white; padding: 12px; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; margin-top: 10px;">دخول</button>
-            </form>
-            <br><a href="/" style="color: #666; text-decoration: none;">العودة للرئيسية</a>
-        </div>
+    return """
+    <html>
+    <head><title>تسجيل الدخول - نظام أعمدة الإنارة بمكة</title><meta charset="utf-8"></head>
+    <body style="font-family: Tahoma; background: #f4f4f4; text-align: center; padding-top: 50px; direction: rtl;">
+        <h2>تسجيل الدخول لنظام أعمدة الإنارة (مكة المكرمة)</h2>
+        <form action="/login" method="post" style="display: inline-block; background: white; padding: 25px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); text-align: right;">
+            <label>اسم المستخدم:</label>
+            <input type="text" name="username" required style="display: block; margin: 10px 0; padding: 10px; width: 250px;">
+            <label>كلمة المرور:</label>
+            <input type="password" name="password" required style="display: block; margin: 10px 0; padding: 10px; width: 250px;"><br>
+            <button type="submit" style="background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; width: 100%;">دخول</button>
+        </form>
     </body>
     </html>
-    """)
+    """
 
 @app.post("/login")
-async def login_action(username: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.username == username, User.password == password).first()
-    if not user:
-        return HTMLResponse("<script>alert('خطأ في اسم المستخدم أو كلمة المرور'); window.location.href='/login';</script>")
-    
-    response = RedirectResponse(url="/admin-dashboard" if user.role == "admin" else "/technician-profile", status_code=status.HTTP_303_SEE_OTHER)
-    response.set_cookie(key="username", value=user.username)
-    response.set_cookie(key="role", value=user.role)
-    response.set_cookie(key="name", value=user.name)
-    return response
+async def login_action(request: Request, username: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
+    try:
+        user = db.query(User).filter(User.username == username, User.password == password).first()
+        if not user:
+            return HTMLResponse("<script>alert('خطأ في اسم المستخدم أو كلمة المرور'); window.location.href='/login';</script>")
+        
+        target_url = "/admin-dashboard" if user.role == "admin" else "/technician-profile"
+        response = RedirectResponse(url=target_url, status_code=status.HTTP_303_SEE_OTHER)
+        response.set_cookie(key="username", value=str(user.username))
+        response.set_cookie(key="role", value=str(user.role))
+        response.set_cookie(key="name", value=str(user.name))
+        return response
+    except Exception as e:
+        traceback.print_exc()
+        return HTMLResponse(f"<h3>حدث خطأ داخلي:</h3><p>{str(e)}</p>", status_code=500)
 
-# 2. لوحة تحكم الإدارة
+# 2. لوحة تحكم الإدارة الشاملة
 @app.get("/admin-dashboard", response_class=HTMLResponse)
 async def admin_dashboard(request: Request, db: Session = Depends(get_db)):
     role = request.cookies.get("role")
     if role != "admin":
         return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
     
-    technicians = db.query(User).all()
-    tech_list_html = ""
-    for t in technicians:
-        tech_list_html += f"<tr><td>{t.name}</td><td>{t.username}</td><td>{t.role}</td><td><a href='/delete-user/{t.id}' style='color:red;'>حذف</a></td></tr>"
-
-    return HTMLResponse(f"""
-    <html lang="ar" dir="rtl">
-    <head><meta charset="UTF-8"><title>لوحة تحكم الإدارة</title></head>
-    <body style="font-family: Tahoma; background: #f4f6f9; padding: 30px;">
-        <div style="background: white; padding: 30px; border-radius: 10px; max-width: 800px; margin: auto; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
-            <h2 style="color: #004085;">لوحة تحكم الإدارة - صيانة الإنارة</h2>
-            <hr>
-            <div style="margin: 20px 0; background: #e2e3e5; padding: 15px; border-radius: 5px;">
-                <h3>إدارة البيانات الجغرافية والأعمدة</h3>
-                <a href="/upload-page" style="display:inline-block; background:#28a745; color:white; padding:10px 20px; border-radius:5px; text-decoration:none; font-weight:bold;">📁 رفع وتحديث جدول الإكسل للأعمدة</a>
-            </div>
-            <h3>إضافة فني / مستخدم جديد</h3>
-            <form action="/add-user" method="post">
-                <input type="text" name="name" placeholder="الاسم الكامل" style="padding: 8px; margin: 5px;" required>
-                <input type="text" name="username" placeholder="اسم المستخدم" style="padding: 8px; margin: 5px;" required>
-                <input type="password" name="password" placeholder="كلمة المرور" style="padding: 8px; margin: 5px;" required>
-                <select name="role" style="padding: 8px; margin: 5px;">
-                    <option value="technician">فني صيانة</option>
-                    <option value="admin">إدارة</option>
-                </select>
-                <button type="submit" style="background: #007bff; color: white; padding: 9px 15px; border: none; border-radius: 5px; cursor: pointer;">إضافة المستخدم</button>
-            </form>
-            <h3 style="margin-top: 30px;">قائمة المستخدمين الحاليين</h3>
-            <table border="1" style="width: 100%; border-collapse: collapse; text-align: center;" cellpadding="8">
-                <tr style="background: #e9ecef;"><th>الاسم</th><th>اسم المستخدم</th><th>الصلاحية</th><th>الإجراء</th></tr>
-                {tech_list_html}
-            </table>
-            <br><a href="/" style="display:inline-block; margin-top:20px; color:#007bff; text-decoration:none;">الرئيسية</a>
-        </div>
-    </body>
-    </html>
-    """)
-
-@app.post("/add-user")
-async def add_user(name: str = Form(...), username: str = Form(...), password: str = Form(...), role: str = Form(...), db: Session = Depends(get_db)):
-    new_user = User(name=name, username=username, password=password, role=role)
-    db.add(new_user)
-    db.commit()
-    return RedirectResponse(url="/admin-dashboard", status_code=status.HTTP_303_SEE_OTHER)
-
-@app.get("/delete-user/{user_id}")
-async def delete_user(user_id: int, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.id == user_id).first()
-    if user:
-        db.delete(user)
-        db.commit()
-    return RedirectResponse(url="/admin-dashboard", status_code=status.HTTP_303_SEE_OTHER)
-
-# 3. صفحة رفع جدول الإكسل
-@app.get("/upload-page", response_class=HTMLResponse)
-async def upload_page(request: Request):
-    if request.cookies.get("role") != "admin":
-        return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
-    return HTMLResponse("""
-    <html lang="ar" dir="rtl">
-    <head><meta charset="UTF-8"><title>رفع جدول الأعمدة</title></head>
-    <body style="font-family: Tahoma; text-align: center; padding: 50px; background: #f4f6f9;">
-        <div style="background: white; padding: 40px; border-radius: 10px; max-width: 500px; margin: auto; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
-            <h2 style="color: #004085;">رفع وتحديث جدول إكسل الأعمدة</h2>
-            <form action="/upload-poles" enctype="multipart/form-data" method="post">
-                <input type="file" name="file" accept=".xlsx, .xls" style="margin: 20px 0; padding: 10px; width: 100%; box-sizing: border-box;" required><br>
-                <button type="submit" style="background: #28a745; color: white; padding: 12px 25px; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; width: 100%;">رفع الملف وتحديث القاعدة</button>
-            </form>
-            <br><a href="/admin-dashboard" style="color: #007bff; text-decoration: none;">العودة لوحة التحكم</a>
-        </div>
-    </body>
-    </html>
-    """)
-
-@app.post("/upload-poles", response_class=HTMLResponse)
-async def upload_poles(request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)):
-    if request.cookies.get("role") != "admin":
-        return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
-    try:
-        contents = await file.read()
-        df = pd.read_excel(io.BytesIO(contents))
+    technicians = db.query(User).filter(User.role == "technician").all()
+    tech_list_html = "".join([f"<li>{t.username} ({t.name}) - <a href='/delete-technician/{t.username}' style='color:red;'>حذف</a></li>" for t in technicians])
+    
+    html_content = f"""
+    <html>
+    <head><title>لوحة التحكم الإدارية</title><meta charset="utf-8"></head>
+    <body style="font-family: Tahoma; direction: rtl; padding: 20px; background: #f9f9f9;">
+        <h1>لوحة تحكم إدارة أعمدة الإنارة (مكة المكرمة)</h1>
+        <hr>
         
-        for index, row in df.iterrows():
-            raw_id = row.get('Pole_ID')
-            if pd.isna(raw_id): continue
-            pole_id_val = str(raw_id).strip()
-            
-            existing_pole = db.query(Pole).filter(Pole.pole_id == pole_id_val).first()
-            if existing_pole:
-                existing_pole.location = str(row.get('Description', 'غير محدد'))
-                existing_pole.status = str(row.get('Pole_Stat', 'سليم'))
-                existing_pole.latitude = float(row.get('Latitude', 0.0))
-                existing_pole.longitude = float(row.get('Longitude', 0.0))
-            else:
-                new_pole = Pole(
-                    pole_id=pole_id_val,
-                    location=str(row.get('Description', 'غير محدد')),
-                    status=str(row.get('Pole_Stat', 'سليم')),
-                    latitude=float(row.get('Latitude', 0.0)),
-                    longitude=float(row.get('Longitude', 0.0))
-                )
-                db.add(new_pole)
-        db.commit()
-        return HTMLResponse("<h2>تم تحديث قاعدة البيانات بنجاح!</h2><a href='/admin-dashboard'>العودة لوحة التحكم</a>")
-    except Exception as e:
-        db.rollback()
-        return HTMLResponse(f"""
-            <div style="font-family: Tahoma; text-align: center; padding: 50px; direction: rtl;">
-                <h2 style="color: red;">❌ حدث خطأ أثناء معالجة الملف: {str(e)}</h2>
-                <a href="/upload-page" style="color: #007bff; text-decoration: none; font-size: 16px;">العودة للمحاولة</a>
-            </div>
-        """)
+        <h3>1. إعدادات الحساب الشخصي (تغيير اسم المستخدم أو كلمة المرور)</h3>
+        <form action="/update-admin-profile" method="post" style="background: #fff; padding: 15px; width: 320px; border-radius: 5px; box-shadow: 0 0 5px rgba(0,0,0,0.05);">
+            اسم المستخدم الجديد: <input type="text" name="new_username" required style="width:100%; margin-bottom:10px; padding:5px;"><br>
+            كلمة المرور الجديدة: <input type="password" name="new_password" required style="width:100%; margin-bottom:10px; padding:5px;"><br>
+            <button type="submit" style="background:green; color:white; padding:8px 15px; border:none; border-radius:3px;">حفظ التعديلات</button>
+        </form>
 
-# 4. صفحة الفني وتعديل البيانات
-@app.get("/technician-profile", response_class=HTMLResponse)
-async def tech_profile(request: Request, db: Session = Depends(get_db)):
-    username = request.cookies.get("username")
-    if not username:
-        return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
-    user = db.query(User).filter(User.username == username).first()
-    return HTMLResponse(f"""
-    <html lang="ar" dir="rtl">
-    <head><meta charset="UTF-8"><title>تعديل بيانات الفني</title></head>
-    <body style="font-family: Tahoma; background: #f4f6f9; padding: 50px; text-align: center;">
-        <div style="background: white; padding: 40px; border-radius: 10px; max-width: 400px; margin: auto; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
-            <h2 style="color: #004085;">تعديل بياناتي الشخصية</h2>
-            <form action="/update-profile" method="post">
-                <label style="display:block; text-align:right; margin-bottom:5px;">الاسم:</label>
-                <input type="text" name="name" value="{user.name}" style="width: 100%; padding: 10px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 5px;" required>
-                <label style="display:block; text-align:right; margin-bottom:5px;">كلمة المرور الجديدة:</label>
-                <input type="password" name="password" value="{user.password}" style="width: 100%; padding: 10px; margin-bottom: 20px; border: 1px solid #ccc; border-radius: 5px;" required>
-                <button type="submit" style="width: 100%; background: #28a745; color: white; padding: 12px; border: none; border-radius: 5px; font-weight: bold; cursor: pointer;">حفظ التعديلات</button>
-            </form>
-            <br><a href="/" style="color: #666; text-decoration: none;">العودة للرئيسية</a>
-        </div>
+        <h3>2. إدارة حسابات الفنيين (إنشاء وإضافة حساب جديد)</h3>
+        <form action="/add-technician" method="post" style="background: #fff; padding: 15px; width: 320px; border-radius: 5px; box-shadow: 0 0 5px rgba(0,0,0,0.05);">
+            اسم الفني (User): <input type="text" name="tech_username" required style="width:100%; margin-bottom:5px; padding:5px;"><br>
+            كلمة المرور: <input type="password" name="tech_password" required style="width:100%; margin-bottom:5px; padding:5px;"><br>
+            الاسم الكامل: <input type="text" name="tech_name" required style="width:100%; margin-bottom:10px; padding:5px;"><br>
+            <button type="submit" style="background:blue; color:white; padding:8px 15px; border:none; border-radius:3px;">إضافة فني جديد</button>
+        </form>
+        <h4>الفنيون الحاليون:</h4>
+        <ul>{tech_list_html if tech_list_html else "<li>لا يوجد فنيون مسجلون حالياً</li>"}</ul>
+
+        <h3>3. رفع جدول البيانات وتحديث القاعدة (Excel)</h3>
+        <form action="/upload-excel" method="post" enctype="multipart/form-data" style="background: #fff; padding: 15px; width: 350px; border-radius: 5px; box-shadow: 0 0 5px rgba(0,0,0,0.05);">
+            اختر ملف إكسل (.xlsx): <input type="file" name="file" accept=".xlsx" required style="margin-bottom:10px;"><br>
+            <button type="submit" style="background:orange; color:black; padding:8px 15px; border:none; border-radius:3px; font-weight:bold;">رفع وتحديث البيانات</button>
+        </form>
+        
+        <br><hr>
+        <a href="/login" style="color:red; font-weight:bold;">تسجيل الخروج</a>
     </body>
     </html>
-    """)
+    """
+    return HTMLResponse(content=html_content)
 
-@app.post("/update-profile")
-async def update_profile(request: Request, name: str = Form(...), password: str = Form(...), db: Session = Depends(get_db)):
-    username = request.cookies.get("username")
-    user = db.query(User).filter(User.username == username).first()
-    if user:
-        user.name = name
-        user.password = password
+# 3. تحديث بيانات المدير الشخصية
+@app.post("/update-admin-profile")
+async def update_admin_profile(request: Request, new_username: str = Form(...), new_password: str = Form(...), db: Session = Depends(get_db)):
+    current_username = request.cookies.get("username")
+    admin_user = db.query(User).filter(User.username == current_username, User.role == "admin").first()
+    if admin_user:
+        admin_user.username = new_username
+        admin_user.password = new_password
         db.commit()
-    return HTMLResponse("<script>alert('تم التحديث بنجاح!'); window.location.href='/technician-profile';</script>")
+    return HTMLResponse("<script>alert('تم تحديث البيانات بنجاح، يرجى تسجيل الدخول مجدداً'); window.location.href='/login';</script>")
 
-# 5. الفحص وعرض الأعمدة
-@app.get("/debug-poles", response_class=HTMLResponse)
-async def debug_poles(db: Session = Depends(get_db)):
-    poles = db.query(Pole).all()
-    html = "<h3 style='font-family: Tahoma; direction: rtl;'>الأعمدة المخزنة في قاعدة البيانات حالياً:</h3><ul style='font-family: Tahoma; direction: rtl;'>"
-    for p in poles:
-        html += f"<li><b>رقم العمود:</b> {p.pole_id} | <b>الموقع:</b> {p.location}</li>"
-    html += "</ul><a href='/' style='font-family: Tahoma;'>العودة للرئيسية</a>"
-    return HTMLResponse(html)
+# 4. إضافة حساب فني جديد
+@app.post("/add-technician")
+async def add_technician(tech_username: str = Form(...), tech_password: str = Form(...), tech_name: str = Form(...), db: Session = Depends(get_db)):
+    existing = db.query(User).filter(User.username == tech_username).first()
+    if existing:
+        return HTMLResponse("<script>alert('اسم المستخدم موجود مسبقاً'); window.location.href='/admin-dashboard';</script>")
+    
+    new_tech = User(
+        username=tech_username,
+        password=tech_password,
+        role="technician",
+        name=tech_name
+    )
+    db.add(new_tech)
+    db.commit()
+    return HTMLResponse("<script>alert('تمت إضافة الفني بنجاح'); window.location.href='/admin-dashboard';</script>")
 
-# 6. تفاصيل العمود وسجل الصيانة
+# 5. حذف حساب فني
+@app.get("/delete-technician/{username}", response_class=HTMLResponse)
+async def delete_technician(username: str, db: Session = Depends(get_db)):
+    tech = db.query(User).filter(User.username == username, User.role == "technician").first()
+    if tech:
+        db.delete(tech)
+        db.commit()
+    return HTMLResponse("<script>alert('تم حذف الفني بنجاح'); window.location.href='/admin-dashboard';</script>")
+
+# 6. رفع وتحديث جدول قاعدة البيانات عبر Excel
+@app.post("/upload-excel")
+async def upload_excel(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    contents = await file.read()
+    df = pd.read_excel(io.BytesIO(contents))
+    for _, row in df.iterrows():
+        pole_id = str(row.get("pole_id"))
+        existing_pole = db.query(Pole).filter(Pole.pole_id == pole_id).first()
+        if existing_pole:
+            existing_pole.location = str(row.get("location", existing_pole.location))
+            existing_pole.status = str(row.get("status", existing_pole.status))
+            existing_pole.latitude = float(row.get("latitude", existing_pole.latitude))
+            existing_pole.longitude = float(row.get("longitude", existing_pole.longitude))
+        else:
+            new_pole = Pole(
+                pole_id=pole_id,
+                location=str(row.get("location", "")),
+                status=str(row.get("status", "Active")),
+                latitude=float(row.get("latitude", 0.0)),
+                longitude=float(row.get("longitude", 0.0))
+            )
+            db.add(new_pole)
+    db.commit()
+    return HTMLResponse("<script>alert('تم تحديث البيانات ورفع الأعمدة بنجاح'); window.location.href='/admin-dashboard';</script>")
+
+# 7. صفحة عرض تفاصيل العمود عبر مسح الـ QR Code
 @app.get("/pole/{pole_id}", response_class=HTMLResponse)
-async def pole_details(pole_id: str, request: Request, db: Session = Depends(get_db)):
-    clean_search_id = str(pole_id).strip()
-    all_poles = db.query(Pole).all()
-    pole = None
-    for p in all_poles:
-        db_id = str(p.pole_id).strip()
-        if (db_id.lower() == clean_search_id.lower() or 
-            db_id.lstrip('0') == clean_search_id.lstrip('0') or
-            db_id.replace('-', '').lower() == clean_search_id.replace('-', '').lower()):
-            pole = p
-            break
-            
+async def view_pole_by_qr(pole_id: str, db: Session = Depends(get_db)):
+    pole = db.query(Pole).filter(Pole.pole_id == pole_id).first()
     if not pole:
-        return HTMLResponse(f"<h2 style='text-align:center; font-family:tahoma; margin-top:50px;'>عذراً، العمود {pole_id} غير موجود في القاعدة.</h2>")
+        return HTMLResponse("<h3 style='text-align:center; margin-top:50px; font-family:Tahoma;'>عذراً، عمود الإنارة غير موجود في النظام</h3>", status_code=404)
     
-    role = request.cookies.get("role")
-    
-    logs_html = ""
-    for log in pole.logs:
-        tech = db.query(User).filter(User.id == log.technician_id).first()
-        tech_name = tech.name if tech else "مجهول"
-        logs_html += f"<li style='margin-bottom: 8px;'><b>{log.date.strftime('%Y-%m-%d %H:%M')}</b> - الفني: <b>{tech_name}</b> - الحالة: <span style='color:blue;'>{log.action}</span> - التفاصيل: {log.details}</li>"
-    if not logs_html:
-        logs_html = "<li>لا يوجد سجل صيانة سابق لهذا العمود.</li>"
-
-    action_section = ""
-    if role == "technician" or role == "admin":
-        action_section = f"""
-        <div style="background: #e9ecef; padding: 15px; border-radius: 8px; margin-top: 20px;">
-            <h3>تسجيل عملية صيانة جديدة</h3>
-            <form action="/add-log/{pole.pole_id}" method="post">
-                <label>الحالة الجديدة:</label>
-                <select name="action" style="padding: 8px; margin: 5px;">
-                    <option value="سليم">سليم</option>
-                    <option value="عطلان">عطلان</option>
-                    <option value="تحت الصيانة">تحت الصيانة</option>
-                </select><br>
-                <textarea name="details" placeholder="اكتب تفاصيل الصيانة..." style="width: 100%; height: 60px; padding: 8px; margin: 5px;" required></textarea><br>
-                <button type="submit" style="background: #28a745; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold;">حفظ سجل الصيانة</button>
-            </form>
-        </div>
-        """
-    else:
-        action_section = "<p style='margin-top:20px; text-align:center;'><a href='/login' style='color: #007bff; text-decoration: none; font-weight: bold;'>تسجيل دخول الفنيين والإدارة</a></p>"
-
-    return HTMLResponse(f"""
-    <html lang="ar" dir="rtl">
-    <head><meta charset="UTF-8"><title>بيانات العمود {pole.pole_id}</title></head>
-    <body style="font-family: Tahoma; background: #f4f6f9; padding: 20px;">
-        <div style="background: white; padding: 30px; border-radius: 10px; max-width: 600px; margin: auto; box-shadow: 0 4px 10px rgba(0,0,0,0.1);">
-            <h2 style="color: #004085; text-align: center;">بطاقة عمود الإنارة: {pole.pole_id}</h2>
-            <hr style="margin: 20px 0;">
-            <p><b>الوصف / الموقع:</b> {pole.location}</p>
-            <p><b>الحالة الحالية:</b> <span style="color: green; font-weight: bold;">{pole.status}</span></p>
-            <p><b>الإحداثيات:</b> خط عرض ({pole.latitude}) ، خط طول ({pole.longitude})</p>
-            <p style="text-align: center;"><a href="https://www.google.com/maps?q={pole.latitude},{pole.longitude}" target="_blank" style="background: #007bff; color: white; padding: 8px 15px; border-radius: 5px; text-decoration: none;">عرض الموقع على خريطة جوجل</a></p>
-            <hr style="margin: 20px 0;">
-            <h3>سجل الصيانة السابق</h3>
-            <ul style="padding-right: 20px;">{logs_html}</ul>
-            {action_section}
-            <br><div style="text-align: center;"><a href="/" style="color: #666; text-decoration: none;">الرئيسية</a></div>
+    html_output = f"""
+    <html>
+    <head><title>تفاصيل العمود {pole.pole_id}</title><meta charset="utf-8"></head>
+    <body style="font-family: Tahoma; direction: rtl; padding: 20px; background: #f2f2f2;">
+        <div style="background: white; padding: 25px; border-radius: 8px; max-width: 500px; margin: auto; box-shadow: 0 0 10px rgba(0,0,0,0.1);">
+            <h2>بيانات عمود الإنارة: {pole.pole_id}</h2>
+            <hr>
+            <p><strong>الموقع الفرعي / الوصف:</strong> {pole.location}</p>
+            <p><strong>حالة التشغيل:</strong> {pole.status}</p>
+            <p><strong>الإحداثيات الجغرافية:</strong> خط عرض {pole.latitude}، خط طول {pole.longitude}</p>
+            <hr>
+            <div style="text-align: center; margin-top: 20px;">
+                <a href="/login" style="background: #28a745; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold;">تسجيل الدخول كفني لتعديل البيانات</a>
+            </div>
         </div>
     </body>
     </html>
-    """)
+    """
+    return HTMLResponse(content=html_output)
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("app:app", host="0.0.0.0", port=10000)
+# 8. صفحة الملف الشخصي للفني (لتعديل بيانات الحقول الخاصة بالأعمدة بعد الدخول)
+@app.get("/technician-profile", response_class=HTMLResponse)
+async def technician_profile(request: Request, db: Session = Depends(get_db)):
+    role = request.cookies.get("role")
+    username = request.cookies.get("username")
+    name = request.cookies.get("name")
+    if role != "technician":
+        return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+    
+    poles = db.query(Pole).all()
+    pole_options = "".join([f"<option value='{p.pole_id}'>{p.pole_id} - {p.location}</option>" for p in poles])
+    
+    html_content = f"""
+    <html>
+    <head><title>بوابة الفنيين الميدانيين</title><meta charset="utf-8"></head>
+    <body style="font-family: Tahoma; direction: rtl; padding: 20px; background: #f4f6f9;">
+        <h2>مرحباً بك يا فني: {name} ({username})</h2>
+        <hr>
+        <div style="background: white; padding: 20px; border-radius: 8px; max-width: 500px; box-shadow: 0 0 10px rgba(0,0,0,0.05);">
+            <h3>تحديث حالة وحقول عمود إنارة ميدانياً</h3>
+            <form action="/update-pole-status" method="post">
+                اختر أو أدخل رقم العمود: 
+                <select name="pole_id" style="width:100%; padding:8px; margin:10px 0;">
+                    {pole_options}
+                </select><br>
+                الحالة الجديدة: 
+                <input type="text" name="new_status" placeholder="مثال: صيانة مطلوبة / يعمل / معطل" required style="width:100%; padding:8px; margin:10px 0;"><br>
+                ملاحظات الصيانة: 
+                <textarea name="notes" placeholder="اكتب تفاصيل الصيانة أو التعديل هنا..." style="width:100%; padding:8px; margin:10px 0; height:80px;"></textarea><br>
+                <button type="submit" style="background:#007bff; color:white; padding:10px 20px; border:none; border-radius:4px; cursor:pointer;">حفظ التحديث</button>
+            </form>
+        </div>
+        <br><a href="/login" style="color:red; font-weight:bold;">تسجيل الخروج</a>
+    </body>
+    </html>
+    """
+    return HTMLResponse(content=html_content)
+
+# 9. مسار حفظ تحديثات الفني للعمود المختار
+@app.post("/update-pole-status")
+async def update_pole_status(pole_id: str = Form(...), new_status: str = Form(...), notes: str = Form(...), db: Session = Depends(get_db)):
+    pole = db.query(Pole).filter(Pole.pole_id == pole_id).first()
+    if pole:
+        pole.status = new_status
+        # تسجيل سجل الصيانة
+        log = MaintenanceLog(pole_id=pole.id, notes=notes)
+        db.add(log)
+        db.commit()
+    return HTMLResponse("<script>alert('تم تحديث بيانات العمود وحفظ سجل الصيانة بنجاح'); window.location.href='/technician-profile';</script>")
