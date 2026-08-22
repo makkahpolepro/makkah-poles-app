@@ -9,7 +9,9 @@ import traceback
 from database import SessionLocal, engine, init_db, User, Pole, MaintenanceLog
 
 app = FastAPI()
-
+@app.get("/")
+async def root():
+    return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
 # تهيئة قاعدة البيانات وإنشاء المستخدم الافتراضي للإدارة عند بدء التشغيل
 @app.on_event("startup")
 def startup_event():
