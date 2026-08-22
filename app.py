@@ -58,7 +58,14 @@ async def login_action(request: Request, username: str = Form(...), password: st
     try:
         user = db.query(User).filter(User.username == username, User.password == password).first()
         if not user:
-            return HTMLResponse("<script>alert('خطأ في اسم المستخدم أو كلمة المرور'); window.location.href='/login';</script>")
+            return HTMLResponse("""
+            <html>
+            <head><meta charset="utf-8"><title>خطأ</title></head>
+            <body style="font-family: Tahoma; text-align: center; padding-top: 50px; direction: rtl;">
+                <script>alert('خطأ في اسم المستخدم أو كلمة المرور'); window.location.href='/login';</script>
+            </body>
+            </html>
+            """)
         
         target_url = "/admin-dashboard" if user.role == "admin" else "/technician-profile"
         response = RedirectResponse(url=target_url, status_code=status.HTTP_303_SEE_OTHER)
@@ -69,7 +76,6 @@ async def login_action(request: Request, username: str = Form(...), password: st
     except Exception as e:
         traceback.print_exc()
         return HTMLResponse(f"<h3>حدث خطأ داخلي:</h3><p>{str(e)}</p>", status_code=500)
-
 @app.get("/admin-dashboard", response_class=HTMLResponse)
 async def admin_dashboard(request: Request, db: Session = Depends(get_db)):
     role = request.cookies.get("role")
