@@ -1,6 +1,5 @@
 from fastapi import FastAPI, Request, Form, Depends, HTTPException, status, UploadFile, File
 from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 import pandas as pd
 import io
@@ -9,9 +8,12 @@ import traceback
 from database import SessionLocal, engine, init_db, User, Pole, MaintenanceLog
 
 app = FastAPI()
+
+# مسار التوجيه الرئيسي للصفحة الافتتاحية
 @app.get("/")
 async def root():
     return RedirectResponse(url="/login", status_code=status.HTTP_303_SEE_OTHER)
+
 # تهيئة قاعدة البيانات وإنشاء المستخدم الافتراضي للإدارة عند بدء التشغيل
 @app.on_event("startup")
 def startup_event():
@@ -22,7 +24,7 @@ def startup_event():
         if not admin_user:
             default_admin = User(
                 username="admin",
-                password="adminpassword123",  # كلمة المرور الافتراضية
+                password="adminpassword123",
                 role="admin",
                 name="مدير النظام العام"
             )
@@ -212,7 +214,7 @@ async def view_pole_by_qr(pole_id: str, db: Session = Depends(get_db)):
     """
     return HTMLResponse(content=html_output)
 
-# 8. صفحة الملف الشخصي للفني (لتعديل بيانات الحقول الخاصة بالأعمدة بعد الدخول)
+# 8. صفحة الملف الشخصي للفني
 @app.get("/technician-profile", response_class=HTMLResponse)
 async def technician_profile(request: Request, db: Session = Depends(get_db)):
     role = request.cookies.get("role")
@@ -256,7 +258,6 @@ async def update_pole_status(pole_id: str = Form(...), new_status: str = Form(..
     pole = db.query(Pole).filter(Pole.pole_id == pole_id).first()
     if pole:
         pole.status = new_status
-        # تسجيل سجل الصيانة
         log = MaintenanceLog(pole_id=pole.id, notes=notes)
         db.add(log)
         db.commit()
